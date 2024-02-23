@@ -6,6 +6,8 @@
 #include <Adafruit_NeoPixel.h>  // NeoPixel library from Adafruit
 #define PIXELPIN       4        // Arduino pin connected to strip
 #define NUMPIXELS      60       // Total number of RGB LEDs on strip
+#define TRACE_SIZE 4            // Length of each tgrace
+#define TRACES_DIST 5           // the distance between trace tail to the next head 
 
 #ifdef __AVR__
   #include <avr/power.h>        // AVR Specific power library
@@ -179,6 +181,8 @@ void setup() {
     Serial.print(devStatus);
     Serial.println(F(")"));
   }
+   // Configure the MPU6050 to measure acceleration
+  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
   Serial.println("finished setup");
 
 }
@@ -222,8 +226,53 @@ void cartesian_to_hsv(float x, float y, float z, uint16_t& hue, uint8_t& saturat
   // Value is based on the z-coordinate
   value = static_cast<uint8_t>(normalized_z * 255);
 }
+int head = NUMPIXELS;
+// Variables to store previous gyro values for integration
+float prevGyroX = 0;
+float prevGyroY = 0;
+float prevGyroZ = 0;
+unsigned long prevTime = 0;
 void loop () {
-  Serial.println("start loop");
+  // Serial.println("start loop");
+
+   // Read gyroscope data
+  int16_t gx, gy, gz;
+  mpu.getRotation(&gx, &gy, &gz);
+
+  // Get current time
+  unsigned long currentTime = millis();
+  
+  // Calculate time difference since last loop iteration
+  float dt = (currentTime - prevTime) / 1000.0; // Convert to seconds
+  
+  // Calculate angular velocities (degrees per second)
+  float gyroX = gx / 131.0; // Sensitivity scale factor for 250 degrees/s
+  float gyroY = gy / 131.0;
+  float gyroZ = gz / 131.0;
+  
+  // Integrate angular velocities to get angles
+  float roll = prevGyroX + gyroX * dt;
+  float pitch = prevGyroY + gyroY * dt;
+  float yaw = prevGyroZ + gyroZ * dt;
+  // Find the maximum angular velocity among the three axes
+  float maxAngularVelocity = max(max(abs(gyroX), abs(gyroY)), abs(gyroZ));
+  Serial.println(maxAngularVelocity);
+
+  // Output angular velocities
+  // Serial.print("Roll speed: ");
+  // Serial.println(gyroX);
+  // Serial.print("Pitch speed: ");
+  // Serial.println(gyroY);
+  // Serial.print("Yaw speed: ");
+  // Serial.println(gyroZ);
+  
+  // Update previous values for next iteration
+  prevGyroX = roll;
+  prevGyroY = pitch;
+  prevGyroZ = yaw;
+  prevTime = currentTime;
+
+  pixels.clear();
   wdt_reset();
   // if programming failed, don't try to do anything
   if (!dmpReady) return;
@@ -246,40 +295,37 @@ void loop () {
   float yaw_deg = ypr[0]  ;//* 180/M_PI;
   float pitch_deg = ypr[1] ;// * 180/M_PI;
   float roll_deg = ypr[2]  ;//* 180/M_PI;
-  // float result[NUMPIXELS][3]; // Variable to store the new coordinates
   float result[3]; // Variable to store the new coordinates
-  // byte hueByte ;
-  // byte saturationByte;
-  // byte valueByte ;
-  for (int i = 0; i < NUMPIXELS; ++i) {
-    yawRotation(yaw_deg, original[i], result);
-    pitchRotation(pitch_deg, result, result);
-    rollRotation(roll_deg, result, result);
+  for (int i = head; i > head-TRACE_SIZE; i--) { // Run on one trace
+    for (int j = i; j > 0; j=j-TRACE_SIZE-TRACES_DIST) { // duplicate the trace till the begining of the strip
+      yawRotation(yaw_deg, original[j], result);
+      pitchRotation(pitch_deg, result, result);
+      rollRotation(roll_deg, result, result);
 
-    // Convert 3D Cartesian coordinates to HSV
-    uint16_t hue;
-    uint8_t saturation, value;
-    cartesian_to_hsv(result[0], result[1], result[2], hue, saturation, value);
-
-
-    // Convert HSV to RGB
-    // uint32_t color = strip.ColorHSV(hue, saturation * 255, value * 255);
-    uint32_t color = pixels.ColorHSV(hue, saturation, value);
-
-    // print_data(result,yaw_deg,pitch_deg,roll_deg);
-
-    // Set NeoPixel color
-    pixels.setPixelColor(i, pixels.gamma32(pixels.ColorHSV(hue, saturation, value)));
-    // pixels.rainbow(0);
-    // Serial.print("hoe, sat, val ");
-    // Serial.print(hue);
-    // Serial.print(",");
-    // Serial.print(saturation);
-    // Serial.print(",");
-    // Serial.print(value);
-    // Serial.println(")");
+      // Convert 3D Cartesian coordinates to HSV
+      uint16_t hue;
+      uint8_t saturation, value;
+      cartesian_to_hsv(result[0], result[1], result[2], hue, saturation, value);
+      // Serial.println(j);
 
 
+      // print_data(result,yaw_deg,pitch_deg,roll_deg);
+
+      // Set NeoPixel color
+      pixels.setPixelColor(j, pixels.gamma32(pixels.ColorHSV(hue, saturation, value-(i*10))));
+      // pixels.rainbow(0);
+      // Serial.print("hoe, sat, val ");
+      // Serial.print(hue);
+      // Serial.print(",");
+      // Serial.print(saturation);
+      // Serial.print(",");
+      // Serial.print(value);
+      // Serial.println(")");
+    } // for j
+  } // for i
+  head ++;
+  if (head == NUMPIXELS + TRACE_SIZE) {
+    head = head - TRACE_SIZE - TRACES_DIST;
   }
   // print_data(result,yaw_deg,pitch_deg,roll_deg);
   // Print HSV values to serial monitor
@@ -292,9 +338,9 @@ void loop () {
 
   pixels.show();
 
-  
-  // delay(100);
-  Serial.println("end loop");
+  int current_delay = 300/(maxAngularVelocity+1);
+  delay(current_delay);
+  // Serial.println("end loop");
 
   // }
 }
