@@ -5,9 +5,11 @@
 #include <FastLED.h>
 
 #define DATA_PIN      4        // Arduino pin connected to strip
-#define NUM_LEDS      30       // Total number of RGB LEDs on strip
+#define NUM_LEDS      60       // Total number of RGB LEDs on strip
 #define TRACE_SIZE 4            // Length of each tgrace
 #define TRACES_DIST 30          // the distance between trace tail to the next head 
+const byte fadeAmt = 100; // amount of fade (0-255)
+const byte fade_odds = 60; // precent to fade
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
 
@@ -81,20 +83,29 @@ void setup() {
     Serial.println("No BNO055 detected, check wiring or I2C address!");
     while (1);
   }
+
   delay(1000);
   bno.setExtCrystalUse(true);
 
   const float radius = 1.0;  // Adjust the radius as needed
   calculateLEDPositions(NUM_LEDS, radius);
-
+  
   Serial.println("Finished setup");
 }
-const byte fadeAmt = 100; // 
+
 void loop() {
   // FastLED.clear();
   sensors_event_t event;
   bno.getEvent(&event);
-
+  
+  imu::Vector<3> angVelocity = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+  // Calculate magnitude of angular velocity
+  float velocity = sqrt(angVelocity.x() * angVelocity.x() +
+                          angVelocity.y() * angVelocity.y() +
+                          angVelocity.z() * angVelocity.z());
+  // Serial.print("Angular Velocity (rad/s): ");
+  // Serial.println(velocity);
+ 
   imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
   float ypr[3];
   ypr[0] = euler.x();
@@ -110,8 +121,8 @@ void loop() {
   pitchRotation(ypr[1], result, result);
   rollRotation(ypr[2], result, result);
   cartesian_to_hsv(result[0], result[1], result[2], hue, saturation, value);
-  Serial.print("hue, sat, val ");
-  Serial.print(hue);
+  // Serial.print("hue, sat, val ");
+  // Serial.print(hue);
   const int deltaHue  = 4;
   const double head_speed = 0.5;
 
@@ -127,9 +138,13 @@ void loop() {
   }
   // Randomly fade the LEDs
   for (int j = 0; j < NUM_LEDS; j++)
-      if (random(3) > 1)
+      if (random(100) < fade_odds)
           leds[j] = leds[j].fadeToBlackBy(fadeAmt);  
 
   FastLED.show();
-  delay(20);
+  int current_delay = 100/max(velocity/5,1);
+  Serial.print("delay: ");
+  Serial.println(current_delay);
+
+  delay(current_delay);
 }
